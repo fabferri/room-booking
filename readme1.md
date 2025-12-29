@@ -12,7 +12,6 @@ This is a well-structured Docker-based room booking application with a three-tie
 - Proper database connection pooling
 
 **Areas for Improvement:**
-- No `.env.example` file in backend (mentioned in README but missing)
 - JWT secret should be loaded from environment variables only (currently has fallback)
 
 ## Security (3.5/5)
@@ -40,7 +39,7 @@ This is a well-structured Docker-based room booking application with a three-tie
 - Business rules properly enforced (15 min - 4 hours, same day only)
 
 **Issues Found:**
-- Bug in conflict detection at backend/server.js lines 218-222: The SQL query logic is overly complex and may have edge cases
+- Conflict detection query (lines 328-334) works correctly but could be simplified to standard interval overlap check
 - No request validation middleware (e.g., express-validator)
 - Missing API documentation/OpenAPI spec
 - No logging framework (just console.log)
@@ -102,11 +101,10 @@ This is a well-structured Docker-based room booking application with a three-tie
    - Implement rate limiting
    - Consider httpOnly cookies for tokens
    
-2. **Booking Conflict Logic:**
-   - Simplify and test the overlap detection query more thoroughly
+2. **Code Optimization:**
+   - Consider simplifying the overlap detection query to standard interval check: `start_time < ? AND end_time > ?`
    
 3. **Missing Files:**
-   - Create `.env.example` file as mentioned in README
    - Add `.dockerignore` files
 
 4. **Production Readiness:**
