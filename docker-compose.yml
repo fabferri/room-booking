@@ -1,0 +1,183 @@
+# ==================================================================================
+# Docker Compose Configuration for Room Booking System
+# ==================================================================================
+# This file defines the multi-container application setup with three services:
+#   1. mysql    - MySQL 8.0 database for data persistence
+#   2. backend  - Node.js Express API server
+#   3. nginx    - Nginx web server (reverse proxy + static file server)
+#
+# Usage:
+#   Start all services:     docker compose up -d
+#   Stop all services:      docker compose down
+#   Rebuild and start:      docker compose up -d --build
+#   View logs:              docker compose logs -f
+#   Remove with volumes:    docker compose down -v
+# ==================================================================================
+
+services:
+  # ================================================================================
+  # MySQL DATABASE SERVICE
+  # ================================================================================
+  # Provides persistent data storage for users, rooms, bookings, and settings
+  # Runs MySQL 8.0 with automatic schema initialization on first startup
+  
+  mysql:
+    # Use official MySQL 8.0 image from Docker Hub
+    image: mysql:8.0
+    
+    # Custom container name for easier identification and management
+    container_name: room_booking_db
+    
+    # Environment variables for MySQL initialization
+    environment:
+      # Root user password (used for administrative tasks)
+      MYSQL_ROOT_PASSWORD: rootpassword
+      
+      # Database name to create on first startup
+      MYSQL_DATABASE: room_booking
+      
+      # Application user credentials (used by backend service)
+      MYSQL_USER: bookinguser
+      MYSQL_PASSWORD: bookingpass
+    
+    # Volume mounts for data persistence and initialization
+    volumes:
+      # Persistent storage for database files (survives container restarts)
+      - mysql_data:/var/lib/mysql
+      
+      # Mount init.sql script - runs automatically on first container startup
+      # Creates tables and inserts initial data (users, rooms, settings)
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    
+    # Port mapping: host:container
+    # Exposes MySQL on port 3306 for local development access
+    # Can be removed in production for better security (backend connects via Docker network)
+    ports:
+      - "3306:3306"
+    
+    # Connect to custom bridge network for inter-service communication
+    networks:
+      - booking_network
+    
+    # Health check to ensure database is ready before dependent services start
+    # Prevents backend from failing when database isn't ready yet
+    healthcheck:
+      # Run mysqladmin ping to verify MySQL is accepting connections
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      # Maximum time to wait for health check command
+      timeout: 20s
+      # Number of consecutive failures before marking as unhealthy
+      retries: 10
+
+  # ================================================================================
+  # BACKEND API SERVICE
+  # ================================================================================
+  # Node.js Express server providing REST API for the Room Booking System
+  # Handles authentication, booking logic, and database operations
+  
+  backend:
+    # Build from local Dockerfile instead of using pre-built image
+    build:
+      # Build context (where Dockerfile and source files are located)
+      context: ./backend
+      # Dockerfile name (could be omitted if using default "Dockerfile")
+      dockerfile: Dockerfile
+    
+    # Custom container name for easier identification
+    container_name: room_booking_api
+    
+    # Environment variables passed to the Node.js application
+    environment:
+      # Database connection settings (matches mysql service)
+      DB_HOST: mysql              # Docker service name (resolved via Docker DNS)
+      DB_USER: bookinguser        # Database username
+      DB_PASSWORD: bookingpass    # Database password
+      DB_NAME: room_booking       # Database name
+      
+      # JWT secret key for signing authentication tokens
+      # IMPORTANT: Change this to a strong random string in production!
+      JWT_SECRET: your_jwt_secret_key_change_in_production
+      
+      # Port the Express server listens on inside the container
+      PORT: 3000
+    
+    # Port mapping: host:container
+    # Exposes API on port 3000 for direct access (useful for testing)
+    # In production, typically only accessed through nginx proxy
+    ports:
+      - "3000:3000"
+    
+    # Service dependencies - ensures mysql is healthy before starting backend
+    depends_on:
+      mysql:
+        # Wait for mysql health check to pass before starting
+        condition: service_healthy
+    
+    # Connect to custom bridge network
+    networks:
+      - booking_network
+    
+    # Volume mounts for development workflow
+    volumes:
+      # Mount source code for hot-reloading during development
+      # Changes to backend files reflect immediately without rebuilding
+      - ./backend:/app
+      
+      # Prevent node_modules from being overwritten by host directory
+      # Uses container's installed modules (from npm install in Dockerfile)
+      - /app/node_modules
+
+  # ================================================================================
+  # NGINX WEB SERVER SERVICE
+  # ================================================================================
+  # Serves as reverse proxy and static file server
+  # Routes /api/* to backend, serves frontend files for all other paths
+  
+  nginx:
+    # Build from local Dockerfile in nginx directory
+    build:
+      # Build context is project root (allows access to frontend files)
+      context: .
+      # Dockerfile location
+      dockerfile: nginx/Dockerfile
+    
+    # Custom container name
+    container_name: room_booking_nginx
+    
+    # Port mapping: host:container
+    # Exposes web application on port 80 (standard HTTP)
+    # Main entry point for users - access app at http://localhost
+    ports:
+      - "80:80"
+    
+    # Ensure backend is running before starting nginx
+    # Prevents proxy errors when nginx starts before backend is ready
+    depends_on:
+      - backend
+    
+    # Connect to custom bridge network
+    networks:
+      - booking_network
+
+# ==================================================================================
+# VOLUMES
+# ==================================================================================
+# Named volumes for persistent data storage
+
+volumes:
+  # MySQL data volume - persists database files across container restarts
+  # Data survives "docker compose down" but is removed with "docker compose down -v"
+  mysql_data:
+
+# ==================================================================================
+# NETWORKS
+# ==================================================================================
+# Custom networks for service isolation and communication
+
+networks:
+  # Custom bridge network for all Room Booking System services
+  # Enables service-to-service communication using service names as hostnames
+  # Example: backend can connect to mysql using hostname "mysql"
+  booking_network:
+    # Bridge driver creates an isolated network on the host
+    driver: bridge
